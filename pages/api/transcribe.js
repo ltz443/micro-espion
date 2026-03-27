@@ -1,38 +1,33 @@
-const express = require('express');
-const { Configuration, OpenAIApi } = require('openai');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
+// pages/api/transcribe.js
 
-const app = express();
-const upload = multer({ dest: 'uploads/' });
+import { OpenAI } from 'openai';
+import fs from 'fs';
+import path from 'path';
 
-const configuration = new Configuration({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-const openai = new OpenAIApi(configuration);
+const openai = new OpenAI(process.env.OPENAI_API_KEY);
 
-app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
-    try {
-        const filePath = path.join(__dirname, '../', req.file.path);
-        const file = fs.createReadStream(filePath);
+export default async function handler(req, res) {
+    if (req.method === 'POST') {
+        try {
+            const { audioFile, metadata } = req.body;
+            const transcription = await openai.transcriptions.create({
+                model: 'whisper-1',
+                file: audioFile,
+            });
 
-        const response = await openai.createTranscription(file, 'whisper-1');
+            const filePath = path.join(process.cwd(), 'transcriptions', `${Date.now()}_transcription.txt`);
+            fs.writeFileSync(filePath, transcription.text);
+            
+            // Metadata generation
+            const metadataFilePath = path.join(process.cwd(), 'transcriptions', `${Date.now()}_metadata.json`);
+            fs.writeFileSync(metadataFilePath, JSON.stringify(metadata));
 
-        // Delete the file after transcription
-        fs.unlinkSync(filePath);
-
-        if (response.status === 200) {
-            const transcript = response.data.text;
-            // TODO: Save the transcript and metadata to GitHub or database
-            res.status(200).json({ transcript });
-        } else {
-            res.status(500).json({ error: 'Failed to transcribe audio.' });
+            res.status(200).json({ transcription: transcription.text, metadata });
+        } catch (error) {
+            res.status(500).json({ error: error.message });
         }
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Internal server error.' });
+    } else {
+        res.setHeader('Allow', ['POST']);
+        res.status(405).end(`Method ${req.method} Not Allowed`);
     }
-});
-
-module.exports = app;
+}
